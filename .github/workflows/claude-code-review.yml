@@ -1,0 +1,84 @@
+name: Claude Code Review
+
+on:
+  workflow_call:
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Please review this pull request with focus on:
+            - Code quality and adherence to project conventions in CLAUDE.md
+            - Potential bugs or logic issues
+            - Security implications
+            - Performance considerations
+            - Potential breaking changes
+
+            Note: The PR branch is already checked out in the current working directory.
+
+            Use `gh pr comment` for top-level feedback on the PR.
+            Only post GitHub comments - don't submit review text as messages.
+
+            Critical: you are only allowed to make 1 comment for the review (use Markdown sections to separate different topics).
+            An automated process will collapse all previous comments made by yourself (claude) except the last one (to avoid clutter in the PR comments),
+            so if you add multiple comments, only the last one will be visible!!! Do not make multiple comments!
+
+          claude_args: |
+            --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+
+      - name: Collapse previous Claude review comments
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          REPO=${{ github.repository }}
+
+          COMMENTS=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            --jq '[.[] | select(.user.login == "claude[bot]") | {id: .id, body: .body}]')
+
+          COUNT=$(echo "$COMMENTS" | jq length)
+
+          if [ "$COUNT" -le 1 ]; then
+            echo "Only ${COUNT} bot comment(s), nothing to collapse."
+            exit 0
+          fi
+
+          echo "$COMMENTS" | jq -c ".[:${COUNT}-1][]" | while read -r comment; do
+            ID=$(echo "$comment" | jq -r '.id')
+
+            if echo "$comment" | jq -r '.body' | head -1 | grep -q '^<details>'; then
+              echo "Comment ${ID} already collapsed, skipping."
+              continue
+            fi
+
+            NEW_BODY=$(echo "$comment" \
+              | jq -r '.body' \
+              | jq -Rs '"<details><summary>Previous Claude review (outdated)</summary>\n\n" + . + "\n\n</details>"')
+
+            gh api "repos/${REPO}/issues/comments/${ID}" -X PATCH -f body="$(echo "$NEW_BODY" | jq -r '.')"
+
+            echo "Collapsed comment ${ID}."
+          done
