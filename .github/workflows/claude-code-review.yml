@@ -26,6 +26,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          model: "claude-opus-4-6"
+          allowed_tools: "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -46,8 +48,6 @@ jobs:
             An automated process will collapse all previous comments made by yourself (claude) except the last one (to avoid clutter in the PR comments),
             so if you add multiple comments, only the last one will be visible!!! Do not make multiple comments!
 
-          claude_args: |
-            --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
 
       - name: Collapse previous Claude review comments
         env:
